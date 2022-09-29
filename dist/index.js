@@ -34,15 +34,21 @@ exports.checkOverride = exports.check = void 0;
 const core = __importStar(__nccwpck_require__(2186));
 const github = __importStar(__nccwpck_require__(5438));
 async function loadConfig(octokit, context) {
+    core.info("required-reviews.run 3.1");
+    const configRef = core.getInput("config-ref");
     // load configuration, note that this call behaves differently than we expect with file sizes larger than 1MB
     const reviewersRequest = await octokit.rest.repos.getContent({
         ...context.repo,
+        ref: configRef != "" ? configRef : undefined,
         path: ".github/reviewers.json",
     });
+    core.info("required-reviews.run 3.2");
     if (!("content" in reviewersRequest.data)) {
         return undefined;
     }
+    core.info("required-reviews.run 3.3");
     const decodedContent = atob(reviewersRequest.data.content.replace(/\n/g, ""));
+    core.info("required-reviews.run 3.4");
     return JSON.parse(decodedContent);
 }
 function getPrNumber(context) {
@@ -146,8 +152,10 @@ function checkOverride(overrides, modifiedFilePaths, modifiedByUsers) {
 }
 exports.checkOverride = checkOverride;
 async function run() {
+    core.info("required-reviews.run.1");
     try {
         const authToken = core.getInput("github-token");
+        const postReview = core.getInput("post-review") === "true";
         const octokit = github.getOctokit(authToken);
         const context = github.context;
         const prNumber = getPrNumber(context);
@@ -155,25 +163,50 @@ async function run() {
             core.setFailed(`Action invoked on unexpected event type '${github.context.eventName}'`);
             return;
         }
+        core.info("required-reviews.run.3");
         const reviewersConfig = await loadConfig(octokit, context);
         if (!reviewersConfig) {
             core.setFailed("Unable to retrieve .github/reviewers.json");
             return;
         }
+        core.info("required-reviews.run.4");
         const modifiedFilepaths = await getModifiedFilepaths(octokit, context, prNumber);
         const approvals = await getApprovals(octokit, context, prNumber);
         const committers = await getCommiters(octokit, context, prNumber);
+        core.info("required-reviews.run.5");
         const approved = check(reviewersConfig, modifiedFilepaths, approvals, core.info, core.warning);
+        core.info("required-reviews.run.6");
         if (!approved) {
             const override = reviewersConfig.overrides !== undefined &&
                 checkOverride(reviewersConfig.overrides, modifiedFilepaths, committers);
             if (!override) {
-                core.setFailed("Missing required approvals.");
+                if (postReview) {
+                    await octokit.rest.pulls.createReview({
+                        ...context.repo,
+                        pull_number: prNumber,
+                        event: "REQUEST_CHANGES",
+                        body: "Missing required reviewers",
+                    });
+                }
+                else {
+                    core.setFailed("Missing required approvals.");
+                }
                 return;
             }
+            // drop through
             core.info("Missing required approvals but allowing due to override.");
         }
+        core.info("required-reviews.run.7");
         // pass
+        if (postReview) {
+            await octokit.rest.pulls.createReview({
+                ...context.repo,
+                pull_number: prNumber,
+                event: "APPROVE",
+                body: "All review requirements have been met",
+            });
+        }
+        core.info("required-reviews.run.8");
         core.info("All review requirements have been met");
     }
     catch (error) {
@@ -326,7 +359,6 @@ const file_command_1 = __nccwpck_require__(717);
 const utils_1 = __nccwpck_require__(5278);
 const os = __importStar(__nccwpck_require__(2037));
 const path = __importStar(__nccwpck_require__(1017));
-const uuid_1 = __nccwpck_require__(5840);
 const oidc_utils_1 = __nccwpck_require__(8041);
 /**
  * The code to exit an action
@@ -356,20 +388,9 @@ function exportVariable(name, val) {
     process.env[name] = convertedVal;
     const filePath = process.env['GITHUB_ENV'] || '';
     if (filePath) {
-        const delimiter = `ghadelimiter_${uuid_1.v4()}`;
-        // These should realistically never happen, but just in case someone finds a way to exploit uuid generation let's not allow keys or values that contain the delimiter.
-        if (name.includes(delimiter)) {
-            throw new Error(`Unexpected input: name should not contain the delimiter "${delimiter}"`);
-        }
-        if (convertedVal.includes(delimiter)) {
-            throw new Error(`Unexpected input: value should not contain the delimiter "${delimiter}"`);
-        }
-        const commandValue = `${name}<<${delimiter}${os.EOL}${convertedVal}${os.EOL}${delimiter}`;
-        file_command_1.issueCommand('ENV', commandValue);
+        return file_command_1.issueFileCommand('ENV', file_command_1.prepareKeyValueMessage(name, val));
     }
-    else {
-        command_1.issueCommand('set-env', { name }, convertedVal);
-    }
+    command_1.issueCommand('set-env', { name }, convertedVal);
 }
 exports.exportVariable = exportVariable;
 /**
@@ -387,7 +408,7 @@ exports.setSecret = setSecret;
 function addPath(inputPath) {
     const filePath = process.env['GITHUB_PATH'] || '';
     if (filePath) {
-        file_command_1.issueCommand('PATH', inputPath);
+        file_command_1.issueFileCommand('PATH', inputPath);
     }
     else {
         command_1.issueCommand('add-path', {}, inputPath);
@@ -427,7 +448,10 @@ function getMultilineInput(name, options) {
     const inputs = getInput(name, options)
         .split('\n')
         .filter(x => x !== '');
-    return inputs;
+    if (options && options.trimWhitespace === false) {
+        return inputs;
+    }
+    return inputs.map(input => input.trim());
 }
 exports.getMultilineInput = getMultilineInput;
 /**
@@ -460,8 +484,12 @@ exports.getBooleanInput = getBooleanInput;
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function setOutput(name, value) {
+    const filePath = process.env['GITHUB_OUTPUT'] || '';
+    if (filePath) {
+        return file_command_1.issueFileCommand('OUTPUT', file_command_1.prepareKeyValueMessage(name, value));
+    }
     process.stdout.write(os.EOL);
-    command_1.issueCommand('set-output', { name }, value);
+    command_1.issueCommand('set-output', { name }, utils_1.toCommandValue(value));
 }
 exports.setOutput = setOutput;
 /**
@@ -590,7 +618,11 @@ exports.group = group;
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function saveState(name, value) {
-    command_1.issueCommand('save-state', { name }, value);
+    const filePath = process.env['GITHUB_STATE'] || '';
+    if (filePath) {
+        return file_command_1.issueFileCommand('STATE', file_command_1.prepareKeyValueMessage(name, value));
+    }
+    command_1.issueCommand('save-state', { name }, utils_1.toCommandValue(value));
 }
 exports.saveState = saveState;
 /**
@@ -656,13 +688,14 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.issueCommand = void 0;
+exports.prepareKeyValueMessage = exports.issueFileCommand = void 0;
 // We use any as a valid input type
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const fs = __importStar(__nccwpck_require__(7147));
 const os = __importStar(__nccwpck_require__(2037));
+const uuid_1 = __nccwpck_require__(5840);
 const utils_1 = __nccwpck_require__(5278);
-function issueCommand(command, message) {
+function issueFileCommand(command, message) {
     const filePath = process.env[`GITHUB_${command}`];
     if (!filePath) {
         throw new Error(`Unable to find environment variable for file command ${command}`);
@@ -674,7 +707,22 @@ function issueCommand(command, message) {
         encoding: 'utf8'
     });
 }
-exports.issueCommand = issueCommand;
+exports.issueFileCommand = issueFileCommand;
+function prepareKeyValueMessage(key, value) {
+    const delimiter = `ghadelimiter_${uuid_1.v4()}`;
+    const convertedValue = utils_1.toCommandValue(value);
+    // These should realistically never happen, but just in case someone finds a
+    // way to exploit uuid generation let's not allow keys or values that contain
+    // the delimiter.
+    if (key.includes(delimiter)) {
+        throw new Error(`Unexpected input: name should not contain the delimiter "${delimiter}"`);
+    }
+    if (convertedValue.includes(delimiter)) {
+        throw new Error(`Unexpected input: value should not contain the delimiter "${delimiter}"`);
+    }
+    return `${key}<<${delimiter}${os.EOL}${convertedValue}${os.EOL}${delimiter}`;
+}
+exports.prepareKeyValueMessage = prepareKeyValueMessage;
 //# sourceMappingURL=file-command.js.map
 
 /***/ }),
@@ -1261,8 +1309,9 @@ exports.context = new Context.Context();
  * @param     token    the repo PAT or GITHUB_TOKEN
  * @param     options  other options to set
  */
-function getOctokit(token, options) {
-    return new utils_1.GitHub(utils_1.getOctokitOptions(token, options));
+function getOctokit(token, options, ...additionalPlugins) {
+    const GitHubWithPlugins = utils_1.GitHub.plugin(...additionalPlugins);
+    return new GitHubWithPlugins(utils_1.getOctokitOptions(token, options));
 }
 exports.getOctokit = getOctokit;
 //# sourceMappingURL=github.js.map

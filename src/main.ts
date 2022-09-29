@@ -37,15 +37,21 @@ interface Reviewers {
 }
 
 async function loadConfig(octokit: GitHubApi, context: Context) {
+  core.info("required-reviews.run 3.1");
+  const configRef = core.getInput("config-ref");
   // load configuration, note that this call behaves differently than we expect with file sizes larger than 1MB
   const reviewersRequest = await octokit.rest.repos.getContent({
     ...context.repo,
+    ref: configRef != "" ? configRef : undefined,
     path: ".github/reviewers.json",
   });
+  core.info("required-reviews.run 3.2");
   if (!("content" in reviewersRequest.data)) {
     return undefined;
   }
+  core.info("required-reviews.run 3.3");
   const decodedContent = atob(reviewersRequest.data.content.replace(/\n/g, ""));
+  core.info("required-reviews.run 3.4");
   return JSON.parse(decodedContent) as Reviewers;
 }
 
@@ -195,6 +201,8 @@ export function checkOverride(
 }
 
 async function run(): Promise<void> {
+  core.info("required-reviews.run.1");
+
   try {
     const authToken = core.getInput("github-token");
     const postReview = core.getInput("post-review") === "true";
@@ -209,11 +217,15 @@ async function run(): Promise<void> {
       return;
     }
 
+    core.info("required-reviews.run.3");
+
     const reviewersConfig = await loadConfig(octokit, context);
     if (!reviewersConfig) {
       core.setFailed("Unable to retrieve .github/reviewers.json");
       return;
     }
+
+    core.info("required-reviews.run.4");
 
     const modifiedFilepaths = await getModifiedFilepaths(
       octokit,
@@ -223,6 +235,8 @@ async function run(): Promise<void> {
     const approvals = await getApprovals(octokit, context, prNumber);
     const committers = await getCommiters(octokit, context, prNumber);
 
+    core.info("required-reviews.run.5");
+
     const approved = check(
       reviewersConfig,
       modifiedFilepaths,
@@ -230,6 +244,9 @@ async function run(): Promise<void> {
       core.info,
       core.warning
     );
+
+    core.info("required-reviews.run.6");
+
     if (!approved) {
       const override =
         reviewersConfig.overrides !== undefined &&
@@ -250,6 +267,7 @@ async function run(): Promise<void> {
       // drop through
       core.info("Missing required approvals but allowing due to override.");
     }
+    core.info("required-reviews.run.7");
     // pass
     if (postReview) {
       await octokit.rest.pulls.createReview({
@@ -259,6 +277,7 @@ async function run(): Promise<void> {
         body: "All review requirements have been met",
       });
     }
+    core.info("required-reviews.run.8");
     core.info("All review requirements have been met");
   } catch (error) {
     if (error instanceof Error) {

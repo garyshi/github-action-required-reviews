@@ -5,6 +5,9 @@ inputs:
   github-token:
     required: true
     description: A valid GitHub token
+  config-ref:
+    required: false
+    description: Load the .github/reviewers.json config from this ref. Can typically set to `github.base_ref`. When absent, the default branch will be used.
 runs:
   using: "node16"
   main: "dist/index.js"
