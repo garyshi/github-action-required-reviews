@@ -1,6 +1,6 @@
-name: required-reviews
+name: github-action-required-reviews
 description: Checks the required reviewers have approved a PR.
-author: theoremlp
+author: garyshi
 inputs:
   github-token:
     required: true
