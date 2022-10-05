@@ -38,13 +38,14 @@ interface Reviewers {
 
 async function loadConfig(octokit: GitHubApi, context: Context) {
   core.info("required-reviews.loadConfig 1");
+  // The base ref of the PR is avaialble from github.context.payload.pull_request.base.ref
+  // If we always want to use that, we can get it directly instead of asking for an extra input
   if (github.context.payload.pull_request) {
     core.info(
       "required-reviews.loadConfig PR base_ref:" +
         github.context.payload.pull_request.base.ref
     );
   }
-  // The base ref of the PR is avaialble from github.context.payload.pull_request.base.ref
   const configRef = core.getInput("config-ref");
   // load configuration, note that this call behaves differently than we expect with file sizes larger than 1MB
   const reviewersRequest = await octokit.rest.repos.getContent({
@@ -106,10 +107,23 @@ async function getApprovals(
     pull_number: prNumber,
   });
 
-  return prReviews.data
-    .filter((review) => review.state === "APPROVED")
-    .filter((review) => review.user !== null)
-    .map((review) => review.user!.login); // eslint-disable-line @typescript-eslint/no-non-null-assertion
+  core.info("getApprovals PR Reviews:" + JSON.stringify(prReviews.data));
+
+  // The reviews are in chronological order so we just need to use the latest state
+  const reviewStatus: { [key: string]: string } = {};
+  prReviews.data.forEach((review) => {
+    if (review.user !== null) {
+      // If we want to exclude certain review states, just skip them here
+      reviewStatus[review.user.login] = review.state;
+    }
+  });
+
+  const approvals = [];
+  for (const login in reviewStatus) {
+    if (reviewStatus[login] == "APPROVED") approvals.push(login);
+  }
+
+  return approvals;
 }
 
 async function getCommiters(
@@ -209,6 +223,9 @@ export function checkOverride(
 
 async function run(): Promise<void> {
   core.info("required-reviews.run.1");
+  core.info(
+    "full github.context.payload:" + JSON.stringify(github.context.payload)
+  );
 
   try {
     const authToken = core.getInput("github-token");
