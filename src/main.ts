@@ -40,12 +40,12 @@ async function loadConfig(octokit: GitHubApi, context: Context) {
   core.info("required-reviews.loadConfig 1");
   // The base ref of the PR is avaialble from github.context.payload.pull_request.base.ref
   // If we always want to use that, we can get it directly instead of asking for an extra input
-  if (github.context.payload.pull_request) {
-    core.info(
-      "required-reviews.loadConfig PR base_ref:" +
-        github.context.payload.pull_request.base.ref
-    );
-  }
+  // if (github.context.payload.pull_request) {
+  //   core.info(
+  //     "required-reviews.loadConfig PR base_ref:" +
+  //       github.context.payload.pull_request.base.ref
+  //   );
+  // }
   const configRef = core.getInput("config-ref");
   // load configuration, note that this call behaves differently than we expect with file sizes larger than 1MB
   const reviewersRequest = await octokit.rest.repos.getContent({
@@ -223,9 +223,10 @@ export function checkOverride(
 
 async function run(): Promise<void> {
   core.info("required-reviews.run.1");
-  core.info(
-    "full github.context.payload:" + JSON.stringify(github.context.payload)
-  );
+  core.info("With input config-ref: " + core.getInput("config-ref"));
+  // core.info(
+  //   "full github.context.payload:" + JSON.stringify(github.context.payload)
+  // );
 
   try {
     const authToken = core.getInput("github-token");
