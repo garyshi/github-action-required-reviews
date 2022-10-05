@@ -34,7 +34,12 @@ exports.checkOverride = exports.check = void 0;
 const core = __importStar(__nccwpck_require__(2186));
 const github = __importStar(__nccwpck_require__(5438));
 async function loadConfig(octokit, context) {
-    core.info("required-reviews.run 3.1");
+    core.info("required-reviews.loadConfig 1");
+    if (github.context.payload.pull_request) {
+        core.info("required-reviews.loadConfig PR base_ref:" +
+            github.context.payload.pull_request.base.ref);
+    }
+    // The base ref of the PR is avaialble from github.context.payload.pull_request.base.ref
     const configRef = core.getInput("config-ref");
     // load configuration, note that this call behaves differently than we expect with file sizes larger than 1MB
     const reviewersRequest = await octokit.rest.repos.getContent({
@@ -42,13 +47,13 @@ async function loadConfig(octokit, context) {
         ref: configRef != "" ? configRef : undefined,
         path: ".github/reviewers.json",
     });
-    core.info("required-reviews.run 3.2");
+    core.info("required-reviews.loadConfig 2");
     if (!("content" in reviewersRequest.data)) {
         return undefined;
     }
-    core.info("required-reviews.run 3.3");
+    core.info("required-reviews.loadConfig 3");
     const decodedContent = atob(reviewersRequest.data.content.replace(/\n/g, ""));
-    core.info("required-reviews.run 3.4");
+    core.info("required-reviews.loadConfig 4");
     return JSON.parse(decodedContent);
 }
 function getPrNumber(context) {
