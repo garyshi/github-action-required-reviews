@@ -91,8 +91,8 @@ async function getApprovals(octokit, context, prNumber) {
     // The reviews are in chronological order so we just need to use the latest state
     const reviewStatus = {};
     prReviews.data.forEach((review) => {
-        if (review.user !== null) {
-            // If we want to exclude certain review states, just skip them here
+        // COMMENTED reviews do not affect the approval state
+        if (review.user !== null && review.state != "COMMENTED") {
             reviewStatus[review.user.login] = review.state;
         }
     });
